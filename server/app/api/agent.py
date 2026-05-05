@@ -9,7 +9,6 @@ from app.core.database import get_db
 from app.models.task import Task
 from app.models.user import User
 from app.schemas.agent import ChatRequest, ChatResponse
-from app.services.memory_service import append_chat_history, get_chat_history
 
 router = APIRouter(prefix="/agent", tags=["Agent"])
 
@@ -31,17 +30,17 @@ def _try_create_task_from_message(message: str, user_id: int, db: Session) -> bo
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat(req: ChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    append_chat_history(current_user.id, db, "user", req.message)
+async def chat(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     task_created = _try_create_task_from_message(req.message, current_user.id, db)
-    reply = await run_planner_agent(user_id=current_user.id, message=req.message, db=db)
+    reply = await run_planner_agent(
+        user_id=current_user.id,
+        message=req.message,
+        db=db,
+    )
     if task_created:
         reply = f"✅ I created a task from your message.\n\n{reply}"
-    append_chat_history(current_user.id, db, "assistant", reply)
-    history = get_chat_history(current_user.id, db)
-    return {"reply": reply, "task_created": task_created, "history": history}
-
-
-@router.get("/history")
-def chat_history(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    return {"items": get_chat_history(current_user.id, db, limit=30)}
+    return {"reply": reply, "task_created": task_created}

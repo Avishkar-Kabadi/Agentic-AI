@@ -8,7 +8,6 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     task_created: bool = False
-    history: list[dict] = []
 
 
 class MemoryCreate(BaseModel):
