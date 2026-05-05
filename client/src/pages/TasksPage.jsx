@@ -1,14 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
+import { apiFetch } from "../api";
 import { Calendar, Trash2, CheckCircle, Circle, Mail } from "lucide-react";
 
 export const TasksPage = () => {
   const token = useSelector((store) => store?.auth?.token);
   const [tasks, setTasks] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
 
   const fetchTasks = async () => {
+    setError("");
+    setIsLoading(true);
     try {
-      const res = await fetch("http://localhost:8000/task/all", {
+      const res = await apiFetch("/task/all", {
         headers: {
           authorization: `Bearer ${token}`,
         },
@@ -19,6 +24,9 @@ export const TasksPage = () => {
       }
     } catch (err) {
       console.error(err);
+      setError("Unable to load tasks right now.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -38,7 +46,7 @@ export const TasksPage = () => {
   const toggleStatus = async (taskId, currentStatus) => {
     const newStatus = currentStatus === "completed" ? "pending" : "completed";
     try {
-      const res = await fetch(`http://localhost:8000/task/${taskId}`, {
+      const res = await apiFetch(`/task/${taskId}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -54,7 +62,7 @@ export const TasksPage = () => {
 
   const deleteTask = async (taskId) => {
     try {
-      const res = await fetch(`http://localhost:8000/task/${taskId}`, {
+      const res = await apiFetch(`/task/${taskId}`, {
         method: "DELETE",
         headers: {
           authorization: `Bearer ${token}`,
@@ -76,7 +84,11 @@ export const TasksPage = () => {
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-        {tasks.length === 0 ? (
+        {isLoading ? (
+          <div className="col-span-full py-12 text-center text-slate-500">Loading tasks...</div>
+        ) : error ? (
+          <div className="col-span-full py-12 text-center text-rose-400">{error}</div>
+        ) : tasks.length === 0 ? (
           <div className="col-span-full py-12 text-center text-slate-500">
             No tasks found. Try syncing your emails!
           </div>

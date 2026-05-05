@@ -1,32 +1,69 @@
 # app/api/email.py
-import os
 import base64
 import hashlib
 import secrets
 import requests
+import redis
+import google.generativeai as genai
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from app.core.database import get_db
+
 from app.api.deps import get_current_user
-from app.models.user import User
 from app.config import settings
+from app.core.database import get_db
+from app.models.email import Email
+from app.models.user import User
 from app.services.email_sync import process_user_emails
+from app.services.gmail_service import fetch_recent_emails
 
 router = APIRouter(prefix="/gmail", tags=["Gmail"])
 
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly"
-]
+genai.configure(api_key=settings.GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-2.5-flash")
 
-# In-memory store for code verifiers
-# { user_id: code_verifier }
-# Good enough for dev — replace with Redis in production
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 _pkce_store: dict[str, str] = {}
+
+try:
+    redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+except Exception:
+    redis_client = None
+
+
+class EmailChatRequest(BaseModel):
+    message: str
+
+
+def _pkce_key(user_id: str) -> str:
+    return f"gmail:pkce:{user_id}"
+
+
+def _save_code_verifier(user_id: str, verifier: str):
+    if redis_client is not None:
+        try:
+            redis_client.setex(_pkce_key(user_id), 600, verifier)
+            return
+        except Exception:
+            pass
+    _pkce_store[user_id] = verifier
+
+
+def _pop_code_verifier(user_id: str) -> str | None:
+    if redis_client is not None:
+        try:
+            key = _pkce_key(user_id)
+            verifier = redis_client.get(key)
+            if verifier:
+                redis_client.delete(key)
+                return verifier
+        except Exception:
+            pass
+    return _pkce_store.pop(user_id, None)
 
 
 def _generate_pkce() -> tuple[str, str]:
-    """Returns (code_verifier, code_challenge)"""
     code_verifier = secrets.token_urlsafe(64)
     digest = hashlib.sha256(code_verifier.encode()).digest()
     code_challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
@@ -36,93 +73,123 @@ def _generate_pkce() -> tuple[str, str]:
 @router.get("/connect")
 def connect_gmail(current_user: User = Depends(get_current_user)):
     code_verifier, code_challenge = _generate_pkce()
-    
-    _pkce_store[str(current_user.id)] = code_verifier
-    
-    # DEBUG — remove after fixing
-    print(f"[PKCE] Stored verifier for user_id: {str(current_user.id)}")
-    print(f"[PKCE] Store contents: {_pkce_store}")
-
+    _save_code_verifier(str(current_user.id), code_verifier)
     params = {
-        "client_id":             settings.GOOGLE_CLIENT_ID,
-        "redirect_uri":          settings.GOOGLE_REDIRECT_URI,
-        "response_type":         "code",
-        "scope":                 " ".join(SCOPES),
-        "access_type":           "offline",
-        "prompt":                "consent",
-        "state":                 str(current_user.id),
-        "code_challenge":        code_challenge,
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": str(current_user.id),
+        "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
-
     from urllib.parse import urlencode
     auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
     return {"auth_url": auth_url}
 
 
 @router.get("/callback")
-def gmail_callback(
-    code: str,
-    state: str,
-    db: Session = Depends(get_db)
-):
-    code_verifier = _pkce_store.pop(state, None)
+def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
+    code_verifier = _pop_code_verifier(state)
     if not code_verifier:
-        raise HTTPException(status_code=400, detail="PKCE verifier not found")
-
-    # DEBUG — see exactly what Google returns
+        raise HTTPException(status_code=400, detail="PKCE verifier not found or expired")
     payload = {
-        "code":          code,
-        "client_id":     settings.GOOGLE_CLIENT_ID,
+        "code": code,
+        "client_id": settings.GOOGLE_CLIENT_ID,
         "client_secret": settings.GOOGLE_CLIENT_SECRET,
-        "redirect_uri":  settings.GOOGLE_REDIRECT_URI,
-        "grant_type":    "authorization_code",
+        "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
         "code_verifier": code_verifier,
     }
-    print(f"[TOKEN] Sending to Google: { {k: v[:20] + '...' if k == 'code' else v for k, v in payload.items()} }")
-
-    token_response = requests.post(
-        "https://oauth2.googleapis.com/token",
-        data=payload
-    )
-
-    print(f"[TOKEN] Google response status: {token_response.status_code}")
-    print(f"[TOKEN] Google response body: {token_response.json()}")
-
+    token_response = requests.post("https://oauth2.googleapis.com/token", data=payload)
     token_data = token_response.json()
-
     if "error" in token_data:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Token exchange failed: {token_data.get('error_description', token_data['error'])}"
-        )
-
+        raise HTTPException(status_code=400, detail=f"Token exchange failed: {token_data.get('error_description', token_data['error'])}")
     user_id = int(state)
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
     from datetime import datetime, timedelta
-    user.gmail_access_token  = token_data.get("access_token")
+    user.gmail_access_token = token_data.get("access_token")
     user.gmail_refresh_token = token_data.get("refresh_token")
-    user.gmail_connected     = True
+    user.gmail_connected = True
     if "expires_in" in token_data:
         user.gmail_token_expiry = datetime.utcnow() + timedelta(seconds=token_data["expires_in"])
     db.commit()
-
     return RedirectResponse(url="http://localhost:5173/settings")
 
-# api/email.py - sync_gmail route
+
 @router.post("/sync")
-async def sync_gmail(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
+async def sync_gmail(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not current_user.gmail_connected:
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+    return await process_user_emails(current_user, db)
+
+
+@router.get("/emails")
+def list_emails(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if not current_user.gmail_connected:
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
-    result = await process_user_emails(current_user, db)
-    return result
+    gmail_emails = fetch_recent_emails(current_user, db, max_results=20)
+    merged = []
+    for em in gmail_emails:
+        row = db.query(Email).filter(Email.gmail_message_id == em["message_id"], Email.user_id == current_user.id).first()
+        if not row:
+            row = Email(
+                user_id=current_user.id,
+                gmail_message_id=em["message_id"],
+                sender=em["sender"],
+                subject=em["subject"],
+                body=em["body"][:2000],
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+        else:
+            row.sender = em["sender"]
+            row.subject = em["subject"]
+            row.body = em["body"][:2000]
+            db.add(row)
+            db.commit()
+
+        merged.append({
+            "id": row.id,
+            "gmail_message_id": row.gmail_message_id,
+            "sender": row.sender,
+            "subject": row.subject,
+            "body": row.body,
+            "summary": row.summary,
+            "created_at": row.created_at,
+        })
+
+    return {"total": len(merged), "items": merged}
+
+
+@router.post("/emails/{email_id}/summarize")
+def summarize_email(email_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    email = db.query(Email).filter(Email.id == email_id, Email.user_id == current_user.id).first()
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    prompt = f"Summarize this email in 3 concise bullet points.\nSubject: {email.subject}\nBody: {email.body}"
+    text = model.generate_content(prompt).text
+    email.summary = text
+    db.add(email)
+    db.commit()
+    return {"summary": text}
+
+
+@router.post("/emails/{email_id}/chat")
+def chat_about_email(email_id: int, req: EmailChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    email = db.query(Email).filter(Email.id == email_id, Email.user_id == current_user.id).first()
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    prompt = f"You are an assistant helping user with one email.\nSubject: {email.subject}\nBody: {email.body}\nUser question: {req.message}\nAnswer briefly and actionably."
+    reply = model.generate_content(prompt).text
+    return {"reply": reply}
+
 
 @router.get("/status")
 def gmail_status(current_user: User = Depends(get_current_user)):
@@ -130,13 +197,10 @@ def gmail_status(current_user: User = Depends(get_current_user)):
 
 
 @router.delete("/disconnect")
-def disconnect_gmail(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    current_user.gmail_access_token  = None
+def disconnect_gmail(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    current_user.gmail_access_token = None
     current_user.gmail_refresh_token = None
-    current_user.gmail_token_expiry  = None
-    current_user.gmail_connected     = False
+    current_user.gmail_token_expiry = None
+    current_user.gmail_connected = False
     db.commit()
     return {"message": "Gmail disconnected"}

@@ -8,6 +8,8 @@ import { Overview } from "./pages/Overview";
 import { TasksPage } from "./pages/TasksPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ChatPage } from "./pages/ChatPage";
+import { MailsPage } from "./pages/MailsPage";
+import { apiFetch } from "./api";
 
 function App() {
   const token = useSelector((store) => store?.auth?.token);
@@ -16,7 +18,7 @@ function App() {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await fetch("http://localhost:8000/auth/me", {
+        const res = await apiFetch("/auth/me", {
           method: "GET",
           headers: {
             Authorization: `Bearer ${token}`,
@@ -54,6 +56,7 @@ function App() {
           <Route index element={<Overview />} />
           <Route path="tasks" element={<TasksPage />} />
           <Route path="chat" element={<ChatPage />} />
+          <Route path="mails" element={<MailsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
 

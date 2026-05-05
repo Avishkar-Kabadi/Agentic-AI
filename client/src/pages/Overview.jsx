@@ -17,6 +17,7 @@ import {
   Area,
 } from "recharts";
 import { useSelector } from "react-redux";
+import { apiFetch } from "../api";
 
 export const Overview = () => {
 
@@ -26,7 +27,7 @@ export const Overview = () => {
 
   const fetchData = async () => {
     try {
-      const res = await fetch("http://localhost:8000/dashboard/stats", {
+      const res = await apiFetch("/dashboard/stats", {
         method: "GET",
         headers: {
           authorization: `Bearer ${token}`,
