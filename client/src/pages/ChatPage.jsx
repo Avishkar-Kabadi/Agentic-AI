@@ -5,9 +5,7 @@ import { Send, Bot, User, Loader2, Sparkles } from "lucide-react";
 
 export const ChatPage = () => {
   const token = useSelector((store) => store?.auth?.token);
-  const [messages, setMessages] = useState([
-    { id: 1, role: "ai", text: "Hello! I'm your AI Planner. How can I help you organize your day?" }
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
@@ -20,6 +18,21 @@ export const ChatPage = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    const fetchHistory = async () => {
+      const res = await apiFetch("/agent/history", { headers: { authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items?.length) {
+          setMessages(data.items.map((m, i) => ({ id: i + 1, role: m.role === "assistant" ? "ai" : "user", text: m.text })));
+        } else {
+          setMessages([{ id: 1, role: "ai", text: "Hello! I'm your AI Planner. How can I help you organize your day?" }]);
+        }
+      }
+    };
+    if (token) fetchHistory();
+  }, [token]);
 
   const handleSend = async (e) => {
     e.preventDefault();
