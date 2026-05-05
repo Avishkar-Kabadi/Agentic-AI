@@ -20,6 +20,7 @@ export const Layout = () => {
   const location = useLocation();
   const token = useSelector((store) => store?.auth?.token);
   const unreadCount = useSelector((store) => store?.emails?.unreadNotifications || 0);
+  const [hasMailNotification, setHasMailNotification] = React.useState(false);
 
   useEffect(() => {
     // WebSocket logic for live updates
@@ -36,6 +37,8 @@ export const Layout = () => {
           if (message.type === "NEW_EMAIL") {
             dispatch(upsertEmailFromNotification(message));
           }
+        if (message.type === "NEW_TASK" || message.type === "EMAIL_PROCESSED") {
+          setHasMailNotification(true);
           console.log("Live update received:", message);
           // In a larger app, we might dispatch a global event here.
           // For now, pages that need to refresh can listen or we just dispatch a trigger.
@@ -85,6 +88,8 @@ export const Layout = () => {
             active={location.pathname === "/mails"}
             notification={unreadCount > 0}
             onClick={() => dispatch(clearEmailNotifications())}
+            notification={hasMailNotification}
+            onClick={() => setHasMailNotification(false)}
           />
           <NavItem
             to="/chat"

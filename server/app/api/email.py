@@ -24,6 +24,10 @@ genai.configure(api_key=settings.GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
 _pkce_store: dict[str, str] = {}
 
 try:
@@ -74,6 +78,7 @@ def _generate_pkce() -> tuple[str, str]:
 def connect_gmail(current_user: User = Depends(get_current_user)):
     code_verifier, code_challenge = _generate_pkce()
     _save_code_verifier(str(current_user.id), code_verifier)
+
     params = {
         "client_id": settings.GOOGLE_CLIENT_ID,
         "redirect_uri": settings.GOOGLE_REDIRECT_URI,
@@ -86,6 +91,7 @@ def connect_gmail(current_user: User = Depends(get_current_user)):
         "code_challenge_method": "S256",
     }
     from urllib.parse import urlencode
+
     auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
     return {"auth_url": auth_url}
 
@@ -95,6 +101,7 @@ def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     code_verifier = _pop_code_verifier(state)
     if not code_verifier:
         raise HTTPException(status_code=400, detail="PKCE verifier not found or expired")
+
     payload = {
         "code": code,
         "client_id": settings.GOOGLE_CLIENT_ID,
@@ -103,15 +110,22 @@ def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
         "grant_type": "authorization_code",
         "code_verifier": code_verifier,
     }
+
     token_response = requests.post("https://oauth2.googleapis.com/token", data=payload)
     token_data = token_response.json()
     if "error" in token_data:
         raise HTTPException(status_code=400, detail=f"Token exchange failed: {token_data.get('error_description', token_data['error'])}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Token exchange failed: {token_data.get('error_description', token_data['error'])}",
+        )
+
     user_id = int(state)
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     from datetime import datetime, timedelta
+
     user.gmail_access_token = token_data.get("access_token")
     user.gmail_refresh_token = token_data.get("refresh_token")
     user.gmail_connected = True
@@ -166,6 +180,8 @@ def list_emails(db: Session = Depends(get_db), current_user: User = Depends(get_
         })
 
     return {"total": len(merged), "items": merged}
+    emails = db.query(Email).filter(Email.user_id == current_user.id).order_by(Email.created_at.desc()).all()
+    return {"total": len(emails), "items": emails}
 
 
 @router.post("/emails/{email_id}/summarize")
@@ -189,6 +205,7 @@ def chat_about_email(email_id: int, req: EmailChatRequest, db: Session = Depends
     prompt = f"You are an assistant helping user with one email.\nSubject: {email.subject}\nBody: {email.body}\nUser question: {req.message}\nAnswer briefly and actionably."
     reply = model.generate_content(prompt).text
     return {"reply": reply}
+
 
 
 @router.get("/status")

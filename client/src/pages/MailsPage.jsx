@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { clearEmailNotifications, setEmails } from "../store/emailsSlice";
+import { useSelector } from "react-redux";
 import { apiFetch } from "../api";
 
 export const MailsPage = () => {
   const token = useSelector((s) => s?.auth?.token);
   const emails = useSelector((s) => s?.emails?.items || []);
   const dispatch = useDispatch();
+  const [emails, setEmails] = useState([]);
   const [selected, setSelected] = useState(null);
   const [chatInput, setChatInput] = useState("");
   const [chat, setChat] = useState([]);
@@ -17,6 +19,7 @@ export const MailsPage = () => {
       const data = await res.json();
       dispatch(setEmails(data.items || []));
       dispatch(clearEmailNotifications());
+      setEmails(data.items || []);
     }
   };
 
@@ -62,6 +65,8 @@ export const MailsPage = () => {
     </div>
     {selected && <div className="col-span-5 bg-slate-900/40 border border-slate-800/50 rounded-2xl p-5 overflow-y-auto">
       <>
+    <div className="col-span-5 bg-slate-900/40 border border-slate-800/50 rounded-2xl p-5 overflow-y-auto">
+      {!selected ? <div className="text-slate-500">Select an email to view details.</div> : <>
         <h2 className="text-xl font-bold text-white mb-2">{selected.subject}</h2>
         <div className="text-xs text-slate-400 mb-4">From: {selected.sender}</div>
         <p className="text-slate-300 whitespace-pre-wrap mb-4">{selected.body}</p>
@@ -69,6 +74,8 @@ export const MailsPage = () => {
         {selected.summary && <div className="mt-4 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-100 whitespace-pre-wrap">{selected.summary}</div>}
       </>
     </div>}
+      </>}
+    </div>
     <div className="col-span-3 bg-slate-900/40 border border-slate-800/50 rounded-2xl p-4 flex flex-col">
       <div className="font-bold text-white mb-3">Mail Assistant</div>
       <div className="flex-1 overflow-y-auto space-y-2">
