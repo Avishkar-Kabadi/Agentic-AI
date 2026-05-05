@@ -1,9 +1,13 @@
 import React, { useEffect, useState } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { clearEmailNotifications, setEmails } from "../store/emailsSlice";
 import { useSelector } from "react-redux";
 import { apiFetch } from "../api";
 
 export const MailsPage = () => {
   const token = useSelector((s) => s?.auth?.token);
+  const emails = useSelector((s) => s?.emails?.items || []);
+  const dispatch = useDispatch();
   const [emails, setEmails] = useState([]);
   const [selected, setSelected] = useState(null);
   const [chatInput, setChatInput] = useState("");
@@ -13,6 +17,8 @@ export const MailsPage = () => {
     const res = await apiFetch("/gmail/emails", { headers: { authorization: `Bearer ${token}` } });
     if (res.ok) {
       const data = await res.json();
+      dispatch(setEmails(data.items || []));
+      dispatch(clearEmailNotifications());
       setEmails(data.items || []);
     }
   };
@@ -26,10 +32,12 @@ export const MailsPage = () => {
 
   const summarize = async () => {
     if (!selected) return;
+    setChat((c) => [...c, { role: "user", text: `Summarize email: ${selected.subject}` }]);
     const res = await apiFetch(`/gmail/emails/${selected.id}/summarize`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
     if (res.ok) {
       const data = await res.json();
       setSelected({ ...selected, summary: data.summary });
+      setChat((c) => [...c, { role: "ai", text: data.summary }]);
       fetchEmails();
     }
   };
@@ -55,6 +63,8 @@ export const MailsPage = () => {
         <div className="text-xs text-slate-500 truncate">{em.sender}</div>
       </button>)}
     </div>
+    {selected && <div className="col-span-5 bg-slate-900/40 border border-slate-800/50 rounded-2xl p-5 overflow-y-auto">
+      <>
     <div className="col-span-5 bg-slate-900/40 border border-slate-800/50 rounded-2xl p-5 overflow-y-auto">
       {!selected ? <div className="text-slate-500">Select an email to view details.</div> : <>
         <h2 className="text-xl font-bold text-white mb-2">{selected.subject}</h2>
@@ -62,6 +72,8 @@ export const MailsPage = () => {
         <p className="text-slate-300 whitespace-pre-wrap mb-4">{selected.body}</p>
         <button onClick={summarize} className="px-4 py-2 bg-indigo-600 rounded-lg text-white">Summarize this mail</button>
         {selected.summary && <div className="mt-4 p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-100 whitespace-pre-wrap">{selected.summary}</div>}
+      </>
+    </div>}
       </>}
     </div>
     <div className="col-span-3 bg-slate-900/40 border border-slate-800/50 rounded-2xl p-4 flex flex-col">

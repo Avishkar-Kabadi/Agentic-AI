@@ -55,6 +55,11 @@ async def process_user_emails(user: User, db: Session) -> dict:
         db.add(email_record)
         db.commit()
 
+        await manager.broadcast_to_user(
+            str(user.id),
+            {"type": "NEW_EMAIL", "subject": em["subject"], "sender": em["sender"], "message_id": em["message_id"]}
+        )
+
         # Call Gemini to classify and create task
         try:
             task, summary = classify_and_create_task(

@@ -16,11 +16,14 @@ from app.core.database import get_db
 from app.models.email import Email
 from app.models.user import User
 from app.services.email_sync import process_user_emails
+from app.services.gmail_service import fetch_recent_emails
 
 router = APIRouter(prefix="/gmail", tags=["Gmail"])
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-2.5-flash")
+
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -141,6 +144,42 @@ async def sync_gmail(db: Session = Depends(get_db), current_user: User = Depends
 
 @router.get("/emails")
 def list_emails(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if not current_user.gmail_connected:
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+
+    gmail_emails = fetch_recent_emails(current_user, db, max_results=20)
+    merged = []
+    for em in gmail_emails:
+        row = db.query(Email).filter(Email.gmail_message_id == em["message_id"], Email.user_id == current_user.id).first()
+        if not row:
+            row = Email(
+                user_id=current_user.id,
+                gmail_message_id=em["message_id"],
+                sender=em["sender"],
+                subject=em["subject"],
+                body=em["body"][:2000],
+            )
+            db.add(row)
+            db.commit()
+            db.refresh(row)
+        else:
+            row.sender = em["sender"]
+            row.subject = em["subject"]
+            row.body = em["body"][:2000]
+            db.add(row)
+            db.commit()
+
+        merged.append({
+            "id": row.id,
+            "gmail_message_id": row.gmail_message_id,
+            "sender": row.sender,
+            "subject": row.subject,
+            "body": row.body,
+            "summary": row.summary,
+            "created_at": row.created_at,
+        })
+
+    return {"total": len(merged), "items": merged}
     emails = db.query(Email).filter(Email.user_id == current_user.id).order_by(Email.created_at.desc()).all()
     return {"total": len(emails), "items": emails}
 

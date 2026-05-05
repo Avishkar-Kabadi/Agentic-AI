@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Link, useLocation, Outlet } from "react-router-dom";
 import { useDispatch, useSelector } from "react-redux";
+import { clearEmailNotifications, upsertEmailFromNotification } from "../store/emailsSlice";
 import { logout } from "../store/authSlice";
 import {
   LayoutDashboard,
@@ -18,6 +19,7 @@ export const Layout = () => {
   const dispatch = useDispatch();
   const location = useLocation();
   const token = useSelector((store) => store?.auth?.token);
+  const unreadCount = useSelector((store) => store?.emails?.unreadNotifications || 0);
   const [hasMailNotification, setHasMailNotification] = React.useState(false);
 
   useEffect(() => {
@@ -31,6 +33,10 @@ export const Layout = () => {
       
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
+        if (message.type === "NEW_TASK" || message.type === "EMAIL_PROCESSED" || message.type === "NEW_EMAIL") {
+          if (message.type === "NEW_EMAIL") {
+            dispatch(upsertEmailFromNotification(message));
+          }
         if (message.type === "NEW_TASK" || message.type === "EMAIL_PROCESSED") {
           setHasMailNotification(true);
           console.log("Live update received:", message);
@@ -48,7 +54,7 @@ export const Layout = () => {
         ws.close();
       };
     }
-  }, [token]);
+  }, [token, dispatch]);
 
   return (
     <div className="flex min-h-screen bg-[#020617] text-slate-200 selection:bg-indigo-500/30">
@@ -80,6 +86,8 @@ export const Layout = () => {
             icon={<Mail size={20} />}
             label="Mails"
             active={location.pathname === "/mails"}
+            notification={unreadCount > 0}
+            onClick={() => dispatch(clearEmailNotifications())}
             notification={hasMailNotification}
             onClick={() => setHasMailNotification(false)}
           />
