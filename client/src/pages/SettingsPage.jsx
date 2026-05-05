@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
+import { apiFetch } from "../api";
 import { Mail, RefreshCw, Unplug, CheckCircle, ExternalLink, Loader2 } from "lucide-react";
 
 export const SettingsPage = () => {
@@ -7,10 +8,12 @@ export const SettingsPage = () => {
   const [gmailStatus, setGmailStatus] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
+  const [statusMessage, setStatusMessage] = useState("");
 
   const fetchStatus = async () => {
+    setStatusMessage("");
     try {
-      const res = await fetch("http://localhost:8000/gmail/status", {
+      const res = await apiFetch("/gmail/status", {
         headers: { authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -19,6 +22,7 @@ export const SettingsPage = () => {
       }
     } catch (err) {
       console.error(err);
+      setStatusMessage("Unable to fetch Gmail status.");
     }
   };
 
@@ -28,12 +32,14 @@ export const SettingsPage = () => {
 
   const handleConnect = async () => {
     try {
-      const res = await fetch("http://localhost:8000/gmail/connect", {
+      const res = await apiFetch("/gmail/connect", {
         headers: { authorization: `Bearer ${token}` },
       });
       if (res.ok) {
         const data = await res.json();
         window.location.href = data.auth_url;
+      } else {
+        setStatusMessage("Could not start Gmail connection.");
       }
     } catch (err) {
       console.error(err);
@@ -42,11 +48,16 @@ export const SettingsPage = () => {
 
   const handleDisconnect = async () => {
     try {
-      const res = await fetch("http://localhost:8000/gmail/disconnect", {
+      const res = await apiFetch("/gmail/disconnect", {
         method: "DELETE",
         headers: { authorization: `Bearer ${token}` },
       });
-      if (res.ok) fetchStatus();
+      if (res.ok) {
+        fetchStatus();
+        setStatusMessage("Gmail disconnected.");
+      } else {
+        setStatusMessage("Failed to disconnect Gmail.");
+      }
     } catch (err) {
       console.error(err);
     }
@@ -56,7 +67,7 @@ export const SettingsPage = () => {
     setIsSyncing(true);
     setSyncResult(null);
     try {
-      const res = await fetch("http://localhost:8000/gmail/sync", {
+      const res = await apiFetch("/gmail/sync", {
         method: "POST",
         headers: { authorization: `Bearer ${token}` },
       });
@@ -65,9 +76,13 @@ export const SettingsPage = () => {
         setSyncResult(data);
         // Dispatch live update so other components refresh
         window.dispatchEvent(new CustomEvent('app:live-update', { detail: { type: 'SYNC_COMPLETE' } }));
+        setStatusMessage("Sync completed successfully.");
+      } else {
+        setStatusMessage("Sync failed. Please try again.");
       }
     } catch (err) {
       console.error(err);
+      setStatusMessage("Sync failed due to network issue.");
     } finally {
       setIsSyncing(false);
     }
@@ -80,6 +95,7 @@ export const SettingsPage = () => {
         <p className="text-slate-400 mt-2">Manage your integrations and application preferences.</p>
       </header>
 
+      {statusMessage && <div className="mb-4 px-4 py-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-200 text-sm">{statusMessage}</div>}
       <div className="bg-slate-900/40 backdrop-blur-xl border border-slate-800/50 rounded-3xl shadow-xl overflow-hidden">
         <div className="p-8 border-b border-slate-800/50 flex items-start gap-6">
           <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center shadow-lg shrink-0">

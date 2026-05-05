@@ -9,17 +9,21 @@ import {
   MessageSquare,
   LogOut,
   TrendingUp,
+  Mail,
+  Bell,
 } from "lucide-react";
+import { buildWebSocketUrl } from "../api";
 
 export const Layout = () => {
   const dispatch = useDispatch();
   const location = useLocation();
   const token = useSelector((store) => store?.auth?.token);
+  const [hasMailNotification, setHasMailNotification] = React.useState(false);
 
   useEffect(() => {
     // WebSocket logic for live updates
     if (token) {
-      const ws = new WebSocket(`ws://localhost:8000/ws/${token}`);
+      const ws = new WebSocket(buildWebSocketUrl(`/ws/${token}`));
       
       ws.onopen = () => {
         console.log("WebSocket Connected");
@@ -28,6 +32,7 @@ export const Layout = () => {
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
         if (message.type === "NEW_TASK" || message.type === "EMAIL_PROCESSED") {
+          setHasMailNotification(true);
           console.log("Live update received:", message);
           // In a larger app, we might dispatch a global event here.
           // For now, pages that need to refresh can listen or we just dispatch a trigger.
@@ -71,6 +76,14 @@ export const Layout = () => {
             active={location.pathname === "/tasks"}
           />
           <NavItem
+            to="/mails"
+            icon={<Mail size={20} />}
+            label="Mails"
+            active={location.pathname === "/mails"}
+            notification={hasMailNotification}
+            onClick={() => setHasMailNotification(false)}
+          />
+          <NavItem
             to="/chat"
             icon={<MessageSquare size={20} />}
             label="AI Agent"
@@ -106,8 +119,8 @@ export const Layout = () => {
   );
 };
 
-const NavItem = ({ to, icon, label, active = false }) => (
-  <Link to={to}>
+const NavItem = ({ to, icon, label, active = false, notification = false, onClick }) => (
+  <Link to={to} onClick={onClick}>
     <div
       className={`flex items-center gap-3 px-4 py-3.5 rounded-xl cursor-pointer transition-all duration-300 relative overflow-hidden group ${
         active
@@ -121,7 +134,7 @@ const NavItem = ({ to, icon, label, active = false }) => (
       <div className={`${active ? "text-indigo-400" : "text-slate-400 group-hover:text-slate-200"} transition-colors duration-300`}>
         {icon}
       </div>
-      <span className="font-medium">{label}</span>
+      <span className="font-medium">{label}</span>{notification && <Bell size={14} className="ml-auto text-amber-400" />}
     </div>
   </Link>
 );
