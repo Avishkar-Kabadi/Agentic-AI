@@ -8,6 +8,7 @@ import { Overview } from "./pages/Overview";
 import { TasksPage } from "./pages/TasksPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ChatPage } from "./pages/ChatPage";
+import { MailsPage } from "./pages/MailsPage";
 import { apiFetch } from "./api";
 
 function App() {
@@ -55,6 +56,7 @@ function App() {
           <Route index element={<Overview />} />
           <Route path="tasks" element={<TasksPage />} />
           <Route path="chat" element={<ChatPage />} />
+          <Route path="mails" element={<MailsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
 

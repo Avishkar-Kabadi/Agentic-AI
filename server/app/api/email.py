@@ -4,18 +4,25 @@ import hashlib
 import secrets
 import requests
 import redis
+import google.generativeai as genai
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.config import settings
 from app.core.database import get_db
+from app.models.email import Email
 from app.models.user import User
 from app.services.email_sync import process_user_emails
 
 router = APIRouter(prefix="/gmail", tags=["Gmail"])
 
+genai.configure(api_key=settings.GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-2.5-flash")
+
+SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 _pkce_store: dict[str, str] = {}
@@ -24,6 +31,10 @@ try:
     redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 except Exception:
     redis_client = None
+
+
+class EmailChatRequest(BaseModel):
+    message: str
 
 
 def _pkce_key(user_id: str) -> str:
@@ -76,7 +87,6 @@ def connect_gmail(current_user: User = Depends(get_current_user)):
         "code_challenge": code_challenge,
         "code_challenge_method": "S256",
     }
-
     from urllib.parse import urlencode
 
     auth_url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
@@ -100,8 +110,8 @@ def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
 
     token_response = requests.post("https://oauth2.googleapis.com/token", data=payload)
     token_data = token_response.json()
-
     if "error" in token_data:
+        raise HTTPException(status_code=400, detail=f"Token exchange failed: {token_data.get('error_description', token_data['error'])}")
         raise HTTPException(
             status_code=400,
             detail=f"Token exchange failed: {token_data.get('error_description', token_data['error'])}",
@@ -111,7 +121,6 @@ def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-
     from datetime import datetime, timedelta
 
     user.gmail_access_token = token_data.get("access_token")
@@ -120,7 +129,6 @@ def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
     if "expires_in" in token_data:
         user.gmail_token_expiry = datetime.utcnow() + timedelta(seconds=token_data["expires_in"])
     db.commit()
-
     return RedirectResponse(url="http://localhost:5173/settings")
 
 
@@ -128,9 +136,37 @@ def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
 async def sync_gmail(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     if not current_user.gmail_connected:
         raise HTTPException(status_code=400, detail="Gmail not connected")
+    return await process_user_emails(current_user, db)
 
-    result = await process_user_emails(current_user, db)
-    return result
+
+@router.get("/emails")
+def list_emails(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    emails = db.query(Email).filter(Email.user_id == current_user.id).order_by(Email.created_at.desc()).all()
+    return {"total": len(emails), "items": emails}
+
+
+@router.post("/emails/{email_id}/summarize")
+def summarize_email(email_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    email = db.query(Email).filter(Email.id == email_id, Email.user_id == current_user.id).first()
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    prompt = f"Summarize this email in 3 concise bullet points.\nSubject: {email.subject}\nBody: {email.body}"
+    text = model.generate_content(prompt).text
+    email.summary = text
+    db.add(email)
+    db.commit()
+    return {"summary": text}
+
+
+@router.post("/emails/{email_id}/chat")
+def chat_about_email(email_id: int, req: EmailChatRequest, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    email = db.query(Email).filter(Email.id == email_id, Email.user_id == current_user.id).first()
+    if not email:
+        raise HTTPException(status_code=404, detail="Email not found")
+    prompt = f"You are an assistant helping user with one email.\nSubject: {email.subject}\nBody: {email.body}\nUser question: {req.message}\nAnswer briefly and actionably."
+    reply = model.generate_content(prompt).text
+    return {"reply": reply}
+
 
 
 @router.get("/status")
