@@ -1,14 +1,14 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useSelector } from "react-redux";
+import { apiFetch } from "../api";
 import { Send, Bot, User, Loader2, Sparkles } from "lucide-react";
 
 export const ChatPage = () => {
   const token = useSelector((store) => store?.auth?.token);
-  const [messages, setMessages] = useState([
-    { id: 1, role: "ai", text: "Hello! I'm your AI Planner. How can I help you organize your day?" }
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState("");
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -19,6 +19,21 @@ export const ChatPage = () => {
     scrollToBottom();
   }, [messages]);
 
+  useEffect(() => {
+    const fetchHistory = async () => {
+      const res = await apiFetch("/agent/history", { headers: { authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.items?.length) {
+          setMessages(data.items.map((m, i) => ({ id: i + 1, role: m.role === "assistant" ? "ai" : "user", text: m.text })));
+        } else {
+          setMessages([{ id: 1, role: "ai", text: "Hello! I'm your AI Planner. How can I help you organize your day?" }]);
+        }
+      }
+    };
+    if (token) fetchHistory();
+  }, [token]);
+
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
@@ -28,8 +43,9 @@ export const ChatPage = () => {
     setInput("");
     setIsLoading(true);
 
+    setError("");
     try {
-      const res = await fetch("http://localhost:8000/agent/chat", {
+      const res = await apiFetch("/agent/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -52,6 +68,7 @@ export const ChatPage = () => {
       }
     } catch (err) {
       console.error(err);
+      setError("Network error. Please try again.");
       setMessages((prev) => [
         ...prev,
         { id: Date.now() + 1, role: "ai", text: "Network error occurred." },
@@ -70,6 +87,7 @@ export const ChatPage = () => {
         <div>
           <h1 className="text-3xl font-bold text-white tracking-tight">AI Planner</h1>
           <p className="text-slate-400 text-sm mt-1">Chat with your assistant to manage tasks and schedule.</p>
+          <p className="text-xs text-indigo-300/80 mt-1">Tip: type <span className="font-semibold">add task: Submit report</span> to create a task instantly.</p>
         </div>
       </header>
 
@@ -109,6 +127,7 @@ export const ChatPage = () => {
           <div ref={messagesEndRef} />
         </div>
 
+        {error && <div className="px-6 py-2 text-sm text-rose-300 bg-rose-500/10 border-t border-rose-500/20">{error}</div>}
         <div className="p-4 bg-slate-900/80 border-t border-slate-800/50 backdrop-blur-md">
           <form onSubmit={handleSend} className="relative max-w-4xl mx-auto flex items-center">
             <input

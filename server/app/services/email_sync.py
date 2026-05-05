@@ -39,21 +39,35 @@ async def process_user_emails(user: User, db: Session) -> dict:
             Email.user_id == user.id
         ).first()
 
-        if existing:
+        if existing and existing.summary:
             skipped += 1
             logger.debug(f"[SYNC] Skipping already processed: {em['subject']}")
             continue
 
-        # Save email record first to prevent reprocessing on failure
-        email_record = Email(
-            user_id=user.id,
-            gmail_message_id=em["message_id"],
-            sender=em["sender"],
-            subject=em["subject"],
-            body=em["body"][:500],
-        )
-        db.add(email_record)
-        db.commit()
+        if existing and not existing.summary:
+            email_record = existing
+            email_record.sender = em["sender"]
+            email_record.subject = em["subject"]
+            email_record.body = em["body"][:500]
+            db.add(email_record)
+            db.commit()
+        else:
+            # Save email record first to prevent reprocessing on failure
+            email_record = Email(
+                user_id=user.id,
+                gmail_message_id=em["message_id"],
+                sender=em["sender"],
+                subject=em["subject"],
+                body=em["body"][:500],
+            )
+            db.add(email_record)
+            db.commit()
+
+            await manager.broadcast_to_user(
+                str(user.id),
+                {"type": "NEW_EMAIL", "subject": em["subject"], "sender": em["sender"], "message_id": em["message_id"]}
+            )
+
 
         # Call Gemini to classify and create task
         try:
