@@ -8,6 +8,7 @@ import { Overview } from "./pages/Overview";
 import { TasksPage } from "./pages/TasksPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ChatPage } from "./pages/ChatPage";
+import { apiFetch } from "./api";
 
 function App() {
   const token = useSelector((store) => store?.auth?.token);
@@ -16,7 +17,7 @@ function App() {
   useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await fetch("http://localhost:8000/auth/me", {
+        const res = await apiFetch("/auth/me", {
           method: "GET",
           headers: {
             Authorization: `Bearer ${token}`,
