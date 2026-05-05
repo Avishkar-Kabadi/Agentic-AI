@@ -10,6 +10,7 @@ import {
   LogOut,
   TrendingUp,
 } from "lucide-react";
+import { buildWebSocketUrl } from "../api";
 
 export const Layout = () => {
   const dispatch = useDispatch();
@@ -19,7 +20,7 @@ export const Layout = () => {
   useEffect(() => {
     // WebSocket logic for live updates
     if (token) {
-      const ws = new WebSocket(`ws://localhost:8000/ws/${token}`);
+      const ws = new WebSocket(buildWebSocketUrl(`/ws/${token}`));
       
       ws.onopen = () => {
         console.log("WebSocket Connected");
